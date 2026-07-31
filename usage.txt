@@ -1,0 +1,155 @@
+================================================================================
+SELF-MANAGED KUBERNETES SETUP SCRIPTS — USAGE GUIDE
+================================================================================
+
+Contents of this folder:
+    1. control-setup.sh   -> Run on the Control Plane (Master) node
+    2. worker-setup.sh    -> Run on each Worker node
+    3. usage.txt           -> This file
+
+Target OS         : Ubuntu 22.04 / 24.04 LTS
+Kubernetes Version: v1.29
+Container Runtime : containerd
+CNI Plugin        : Calico v3.27.0
+
+--------------------------------------------------------------------------------
+STEP 1 — UPLOAD SCRIPTS TO EACH EC2 INSTANCE
+--------------------------------------------------------------------------------
+
+From your local machine, copy the scripts to each node using scp:
+
+    scp -i my-key.pem control-setup.sh ubuntu@<MASTER_PUBLIC_IP>:~
+    scp -i my-key.pem worker-setup.sh  ubuntu@<WORKER_PUBLIC_IP>:~
+
+(You only need control-setup.sh on the master, and worker-setup.sh on each
+worker — no need to copy both to every node.)
+
+--------------------------------------------------------------------------------
+STEP 2 — RUN control-setup.sh ON THE MASTER NODE
+--------------------------------------------------------------------------------
+
+SSH into the master node:
+    ssh -i my-key.pem ubuntu@<MASTER_PUBLIC_IP>
+
+Make the script executable and run it with the master's PRIVATE IP:
+    chmod +x control-setup.sh
+    sudo ./control-setup.sh <MASTER_PRIVATE_IP>
+
+Example:
+    sudo ./control-setup.sh 10.0.1.139
+
+This script will automatically:
+    - Disable swap
+    - Install containerd, kubelet, kubeadm, kubectl
+    - Configure kernel modules and networking
+    - Run "kubeadm init"
+    - Configure kubectl access
+    - Install the Calico CNI plugin
+    - Print final node/pod status for verification
+
+Output logs saved at:
+    /root/kubeadm-init-output.log
+
+--------------------------------------------------------------------------------
+STEP 3 — GET THE JOIN COMMAND (RUN ON MASTER)
+--------------------------------------------------------------------------------
+
+After control-setup.sh completes successfully, generate a join command:
+
+    kubeadm token create --print-join-command
+
+Copy the full output. It will look like:
+
+    kubeadm join 10.0.1.139:6443 --token abcdef.0123456789abcdef \
+        --discovery-token-ca-cert-hash sha256:1234abcd...
+
+You will need three values from this output for Step 4:
+    1. MASTER_IP:PORT   (e.g. 10.0.1.139:6443)
+    2. TOKEN             (e.g. abcdef.0123456789abcdef)
+    3. CA_CERT_HASH      (e.g. sha256:1234abcd...)
+
+NOTE: Tokens expire after 24 hours. If expired, just re-run the command
+      above on the master to generate a fresh one.
+
+--------------------------------------------------------------------------------
+STEP 4 — RUN worker-setup.sh ON EACH WORKER NODE
+--------------------------------------------------------------------------------
+
+SSH into the worker node:
+    ssh -i my-key.pem ubuntu@<WORKER_PUBLIC_IP>
+
+Make the script executable and run it with the 3 values from Step 3:
+    chmod +x worker-setup.sh
+    sudo ./worker-setup.sh <MASTER_IP:PORT> <TOKEN> <CA_CERT_HASH>
+
+Example:
+    sudo ./worker-setup.sh 10.0.1.139:6443 abcdef.0123456789abcdef sha256:1234abcd...
+
+This script will automatically:
+    - Disable swap
+    - Install containerd, kubelet, kubeadm, kubectl
+    - Configure kernel modules and networking
+    - Check network connectivity to the master API server (fails fast with
+      a clear message if Security Group rules are blocking it)
+    - Run "kubeadm join" to register with the cluster
+
+Output logs saved at:
+    /root/kubeadm-join-output.log
+
+Repeat this step for every additional worker node, using the SAME join
+command values from Step 3 (as long as the token has not expired).
+
+--------------------------------------------------------------------------------
+STEP 5 — VERIFY THE CLUSTER (RUN ON MASTER)
+--------------------------------------------------------------------------------
+
+    kubectl get nodes -o wide
+
+All nodes (master + workers) should show STATUS = Ready within 30-60
+seconds of joining (Calico needs a moment to initialize networking on
+each new node).
+
+--------------------------------------------------------------------------------
+REQUIRED SECURITY GROUP PORTS (REMINDER)
+--------------------------------------------------------------------------------
+
+    Component                 Port(s)           Direction
+    --------------------------------------------------------------
+    SSH                        22                Admin -> Node
+    API Server                 6443              Worker -> Master
+    etcd                       2379-2380         Master <-> Master
+    Kubelet API                10250             Master <-> Worker
+    kube-scheduler              10259             Internal (Master)
+    kube-controller-manager     10257             Internal (Master)
+    NodePort Range              30000-32767       External/Master -> Worker
+    Calico/CNI (pod traffic)   All traffic       Master <-> Worker (SG-to-SG)
+
+If a worker fails to join, the most common cause is a missing Security
+Group rule between the control-plane-sg and the worker's SG on port 6443.
+
+--------------------------------------------------------------------------------
+TROUBLESHOOTING
+--------------------------------------------------------------------------------
+
+Script exits with an error:
+    - Read the last printed line; the script stops immediately on any
+      failed command (set -euo pipefail) and names the line number.
+
+Worker won't join / connectivity check fails:
+    - Check Security Group rules (see table above).
+    - Confirm the master's private IP and port are correct.
+    - Confirm the token has not expired (24 hour validity).
+
+Re-running a script:
+    - Both scripts are safe to re-run. If the cluster is already
+      initialized (control-setup.sh) or the node has already joined
+      (worker-setup.sh), the script will detect this and skip that step
+      instead of failing.
+
+Starting over on a node:
+    sudo kubeadm reset
+    (then re-run the relevant script)
+
+================================================================================
+END OF USAGE GUIDE
+================================================================================
