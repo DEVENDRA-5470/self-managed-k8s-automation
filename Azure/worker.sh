@@ -10,11 +10,78 @@ echo "=========================================="
 echo " Kubernetes Worker Bootstrap"
 echo "=========================================="
 
+# =========================================================
+# Validate parameters FIRST
+# =========================================================
+
+if [ "$#" -ne 3 ]; then
+  echo "ERROR: Invalid number of parameters."
+  echo
+  echo "Usage:"
+  echo "  sudo ./worker.sh <CONTROLLER_PRIVATE_IP> <TOKEN> <CA_CERT_HASH>"
+  echo
+  echo "Example:"
+  echo "  sudo ./worker.sh \\"
+  echo "    10.20.1.4 \\"
+  echo "    'abcdef.0123456789abcdef' \\"
+  echo "    'sha256:0123456789abcdef...'"
+  echo
+  exit 1
+fi
+
+CONTROLLER_IP="$1"
+TOKEN="$2"
+CA_CERT_HASH="$3"
+
 # ---------------------------------------------------------
-# System preparation
+# Validate individual parameters
 # ---------------------------------------------------------
 
+if [ -z "${CONTROLLER_IP}" ]; then
+  echo "ERROR: Controller private IP is missing."
+  exit 1
+fi
+
+if [ -z "${TOKEN}" ]; then
+  echo "ERROR: Kubernetes token is missing."
+  exit 1
+fi
+
+if [ -z "${CA_CERT_HASH}" ]; then
+  echo "ERROR: Kubernetes CA certificate hash is missing."
+  exit 1
+fi
+
+# ---------------------------------------------------------
+# Basic format validation
+# ---------------------------------------------------------
+
+if [[ ! "${TOKEN}" =~ ^[a-z0-9]{6}\.[a-z0-9]{16}$ ]]; then
+  echo "ERROR: Invalid kubeadm token format."
+  echo "Expected: abcdef.0123456789abcdef"
+  exit 1
+fi
+
+if [[ ! "${CA_CERT_HASH}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+  echo "ERROR: Invalid CA certificate hash format."
+  echo "Expected: sha256:<64 hexadecimal characters>"
+  exit 1
+fi
+
+echo "Controller IP: ${CONTROLLER_IP}"
+echo "Kubernetes token: [REDACTED]"
+echo "CA certificate hash: [REDACTED]"
+
+echo "Parameters validated successfully."
+
+# =========================================================
+# System preparation
+# =========================================================
+
+echo "Preparing system..."
+
 swapoff -a
+
 sed -i '/ swap / s/^/#/' /etc/fstab
 
 apt-get update
@@ -28,9 +95,11 @@ apt-get install -y \
   conntrack \
   containerd
 
-# ---------------------------------------------------------
+# =========================================================
 # Kubernetes repository
-# ---------------------------------------------------------
+# =========================================================
+
+echo "Configuring Kubernetes repository..."
 
 mkdir -p /etc/apt/keyrings
 
@@ -50,9 +119,11 @@ apt-get install -y \
 
 apt-mark hold kubelet kubeadm
 
-# ---------------------------------------------------------
+# =========================================================
 # Containerd
-# ---------------------------------------------------------
+# =========================================================
+
+echo "Configuring containerd..."
 
 mkdir -p /etc/containerd
 
@@ -63,12 +134,16 @@ sed -i \
   /etc/containerd/config.toml
 
 systemctl restart containerd
+
 systemctl enable containerd
+
 systemctl enable kubelet
 
-# ---------------------------------------------------------
+# =========================================================
 # Kubernetes networking prerequisites
-# ---------------------------------------------------------
+# =========================================================
+
+echo "Configuring Kubernetes networking..."
 
 cat > /etc/sysctl.d/99-kubernetes.conf <<'EOF'
 net.bridge.bridge-nf-call-iptables=1
@@ -77,28 +152,20 @@ net.ipv4.ip_forward=1
 EOF
 
 modprobe overlay
+
 modprobe br_netfilter
 
 sysctl --system
 
-# ---------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------
-
-CONTROLLER_IP="${CONTROLLER_IP:-}"
-
-if [ -z "${CONTROLLER_IP}" ]; then
-  echo "ERROR: CONTROLLER_IP is not set"
-  exit 1
-fi
-
-echo "Controller IP: ${CONTROLLER_IP}"
-
-# ---------------------------------------------------------
+# =========================================================
 # Wait for Kubernetes API
-# ---------------------------------------------------------
+# =========================================================
 
-echo "Waiting for Kubernetes API..."
+echo "=========================================="
+echo " Waiting for Kubernetes API"
+echo "=========================================="
+
+echo "Controller: ${CONTROLLER_IP}:6443"
 
 until timeout 3 bash -c "</dev/tcp/${CONTROLLER_IP}/6443"; do
   echo "Controller API port not ready..."
@@ -118,37 +185,27 @@ done
 
 echo "Kubernetes API is ready."
 
-# ---------------------------------------------------------
-# Worker join
-# ---------------------------------------------------------
-#
-# The controller must expose a join command.
-#
-# For now this script expects:
-#
-#   /opt/k8s/kubeadm-join.sh
-#
-# to contain the generated kubeadm join command.
-#
-# ---------------------------------------------------------
+# =========================================================
+# Join Kubernetes cluster
+# =========================================================
 
-JOIN_COMMAND="/opt/k8s/kubeadm-join.sh"
+echo "=========================================="
+echo " Joining Kubernetes Cluster"
+echo "=========================================="
 
-until [ -f "${JOIN_COMMAND}" ]; do
-  echo "Waiting for kubeadm join command..."
-  sleep 10
-done
+kubeadm join "${CONTROLLER_IP}:6443" \
+  --token "${TOKEN}" \
+  --discovery-token-ca-cert-hash "${CA_CERT_HASH}"
 
-chmod +x "${JOIN_COMMAND}"
-
-bash "${JOIN_COMMAND}"
-
-# ---------------------------------------------------------
+# =========================================================
 # Worker ready
-# ---------------------------------------------------------
+# =========================================================
 
-touch "/var/lib/kubeadm-worker-ready"
+touch /var/lib/kubeadm-worker-ready
 
 echo "=========================================="
 echo " Kubernetes Worker READY"
 echo "=========================================="
+
+echo "Controller: ${CONTROLLER_IP}"
+echo "Worker successfully joined the cluster."
