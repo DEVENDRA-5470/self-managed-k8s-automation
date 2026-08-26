@@ -10,7 +10,7 @@ ssh -i my-key.pem ubuntu@<CONTROLLER_PUBLIC_IP>
 
 Go to scripts:
 
-cd ~/self-managed-k8s-automation/AWS
+cd ~/self-managed-k8s-automation/Aws
 
 Make executable:
 
@@ -44,7 +44,7 @@ ssh -i my-key.pem ubuntu@<WORKER_PUBLIC_IP>
 
 Go to scripts:
 
-cd ~/self-managed-k8s-automation/AWS
+cd ~/self-managed-k8s-automation/Aws
 
 Make executable:
 
