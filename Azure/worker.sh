@@ -21,10 +21,7 @@ if [ "$#" -ne 3 ]; then
   echo "  sudo ./worker.sh <CONTROLLER_PRIVATE_IP> <TOKEN> <CA_CERT_HASH>"
   echo
   echo "Example:"
-  echo "  sudo ./worker.sh \\"
-  echo "    10.20.1.4 \\"
-  echo "    'abcdef.0123456789abcdef' \\"
-  echo "    'sha256:0123456789abcdef...'"
+  echo "  sudo ./worker.sh \\\n    10.20.1.4 \\\n    'abcdef.0123456789abcdef' \\\n    'sha256:0123456789abcdef...'"
   echo
   exit 1
 fi
@@ -205,6 +202,7 @@ touch /var/lib/kubeadm-worker-ready
 
 echo "=========================================="
 echo " Kubernetes Worker READY"
+
 echo "=========================================="
 
 echo "Controller: ${CONTROLLER_IP}"
