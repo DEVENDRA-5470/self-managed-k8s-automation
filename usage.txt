@@ -1,155 +1,214 @@
 ================================================================================
-SELF-MANAGED KUBERNETES SETUP SCRIPTS — USAGE GUIDE
+SELF-MANAGED KUBERNETES
+SIMPLE USAGE GUIDE
 ================================================================================
 
-Contents of this folder:
-    1. control-setup.sh   -> Run on the Control Plane (Master) node
-    2. worker-setup.sh    -> Run on each Worker node
-    3. usage.txt           -> This file
+This folder contains:
 
-Target OS         : Ubuntu 22.04 / 24.04 LTS
-Kubernetes Version: v1.29
-Container Runtime : containerd
-CNI Plugin        : Calico v3.27.0
+    controller.sh  -> Run on the Controller node
+    worker.sh      -> Run on the Worker node
 
---------------------------------------------------------------------------------
-STEP 1 — UPLOAD SCRIPTS TO EACH EC2 INSTANCE
---------------------------------------------------------------------------------
+Kubernetes : v1.34
+OS         : Ubuntu 22.04
+Runtime    : containerd
+CNI        : Flannel
 
-From your local machine, copy the scripts to each node using scp:
+Cluster:
 
-    scp -i my-key.pem control-setup.sh ubuntu@<MASTER_PUBLIC_IP>:~
-    scp -i my-key.pem worker-setup.sh  ubuntu@<WORKER_PUBLIC_IP>:~
+    Controller
+        |
+        +---- Worker1
 
-(You only need control-setup.sh on the master, and worker-setup.sh on each
-worker — no need to copy both to every node.)
 
---------------------------------------------------------------------------------
-STEP 2 — RUN control-setup.sh ON THE MASTER NODE
---------------------------------------------------------------------------------
+================================================================================
+SECTION 1 - CONTROLLER
+================================================================================
 
-SSH into the master node:
-    ssh -i my-key.pem ubuntu@<MASTER_PUBLIC_IP>
+STEP 1 - SSH INTO CONTROLLER
 
-Make the script executable and run it with the master's PRIVATE IP:
-    chmod +x control-setup.sh
-    sudo ./control-setup.sh <MASTER_PRIVATE_IP>
+    ssh -i ~/.ssh/id_ed25519 azureuser@<CONTROLLER_PUBLIC_IP>
+
+
+STEP 2 - GO TO THE SCRIPT
+
+    cd ~/self-managed-k8s-automation/Azure
+
+
+STEP 3 - MAKE SCRIPT EXECUTABLE
+
+    chmod +x controller.sh
+
+
+STEP 4 - RUN CONTROLLER SCRIPT
+
+    sudo ./controller.sh
+
+
+The script automatically:
+
+    - Disables swap
+    - Installs containerd
+    - Installs kubeadm
+    - Installs kubelet
+    - Installs kubectl
+    - Configures Kubernetes networking
+    - Initializes the Kubernetes control plane
+    - Installs Flannel
+    - Configures kubectl
+    - Generates a worker join command
+
+
+STEP 5 - GET WORKER JOIN INFORMATION
+
+Run:
+
+    sudo kubeadm token create --ttl 0 --print-join-command
+
+
+You will get something similar to:
+
+    kubeadm join 10.20.1.4:6443 \
+      --token abcdef.0123456789abcdef \
+      --discovery-token-ca-cert-hash sha256:123456...
+
+
+You need these 3 values:
+
+    1. Controller IP
+
+       10.20.1.4
+
+    2. Token
+
+       abcdef.0123456789abcdef
+
+    3. CA certificate hash
+
+       sha256:123456...
+
+
+Keep these values safe.
+
+DO NOT commit the token to GitHub.
+
+
+================================================================================
+SECTION 2 - WORKER
+================================================================================
+
+STEP 1 - SSH INTO WORKER
+
+    ssh -i ~/.ssh/id_ed25519 azureuser@<WORKER_PUBLIC_IP>
+
+
+STEP 2 - GO TO THE SCRIPT
+
+    cd ~/self-managed-k8s-automation/Azure
+
+
+STEP 3 - MAKE SCRIPT EXECUTABLE
+
+    chmod +x worker.sh
+
+
+STEP 4 - RUN WORKER SCRIPT
+
+Use the 3 values generated on the Controller:
+
+    sudo ./worker.sh \
+      <CONTROLLER_PRIVATE_IP> \
+      <TOKEN> \
+      <CA_CERT_HASH>
+
 
 Example:
-    sudo ./control-setup.sh 10.0.1.139
 
-This script will automatically:
-    - Disable swap
-    - Install containerd, kubelet, kubeadm, kubectl
-    - Configure kernel modules and networking
-    - Run "kubeadm init"
-    - Configure kubectl access
-    - Install the Calico CNI plugin
-    - Print final node/pod status for verification
+    sudo ./worker.sh \
+      10.20.1.4 \
+      "abcdef.0123456789abcdef" \
+      "sha256:123456..."
 
-Output logs saved at:
-    /root/kubeadm-init-output.log
 
---------------------------------------------------------------------------------
-STEP 3 — GET THE JOIN COMMAND (RUN ON MASTER)
---------------------------------------------------------------------------------
+The script automatically:
 
-After control-setup.sh completes successfully, generate a join command:
+    - Checks that all 3 parameters are provided
+    - Disables swap
+    - Installs containerd
+    - Installs kubeadm
+    - Installs kubelet
+    - Configures Kubernetes networking
+    - Waits for the Controller API
+    - Runs kubeadm join
+    - Joins the Worker to the cluster
 
-    kubeadm token create --print-join-command
 
-Copy the full output. It will look like:
+If any parameter is missing, the script stops immediately.
 
-    kubeadm join 10.0.1.139:6443 --token abcdef.0123456789abcdef \
-        --discovery-token-ca-cert-hash sha256:1234abcd...
 
-You will need three values from this output for Step 4:
-    1. MASTER_IP:PORT   (e.g. 10.0.1.139:6443)
-    2. TOKEN             (e.g. abcdef.0123456789abcdef)
-    3. CA_CERT_HASH      (e.g. sha256:1234abcd...)
+================================================================================
+VERIFY THE CLUSTER
+================================================================================
 
-NOTE: Tokens expire after 24 hours. If expired, just re-run the command
-      above on the master to generate a fresh one.
-
---------------------------------------------------------------------------------
-STEP 4 — RUN worker-setup.sh ON EACH WORKER NODE
---------------------------------------------------------------------------------
-
-SSH into the worker node:
-    ssh -i my-key.pem ubuntu@<WORKER_PUBLIC_IP>
-
-Make the script executable and run it with the 3 values from Step 3:
-    chmod +x worker-setup.sh
-    sudo ./worker-setup.sh <MASTER_IP:PORT> <TOKEN> <CA_CERT_HASH>
-
-Example:
-    sudo ./worker-setup.sh 10.0.1.139:6443 abcdef.0123456789abcdef sha256:1234abcd...
-
-This script will automatically:
-    - Disable swap
-    - Install containerd, kubelet, kubeadm, kubectl
-    - Configure kernel modules and networking
-    - Check network connectivity to the master API server (fails fast with
-      a clear message if Security Group rules are blocking it)
-    - Run "kubeadm join" to register with the cluster
-
-Output logs saved at:
-    /root/kubeadm-join-output.log
-
-Repeat this step for every additional worker node, using the SAME join
-command values from Step 3 (as long as the token has not expired).
-
---------------------------------------------------------------------------------
-STEP 5 — VERIFY THE CLUSTER (RUN ON MASTER)
---------------------------------------------------------------------------------
+Go back to the Controller:
 
     kubectl get nodes -o wide
 
-All nodes (master + workers) should show STATUS = Ready within 30-60
-seconds of joining (Calico needs a moment to initialize networking on
-each new node).
 
---------------------------------------------------------------------------------
-REQUIRED SECURITY GROUP PORTS (REMINDER)
---------------------------------------------------------------------------------
+Expected:
 
-    Component                 Port(s)           Direction
-    --------------------------------------------------------------
-    SSH                        22                Admin -> Node
-    API Server                 6443              Worker -> Master
-    etcd                       2379-2380         Master <-> Master
-    Kubelet API                10250             Master <-> Worker
-    kube-scheduler              10259             Internal (Master)
-    kube-controller-manager     10257             Internal (Master)
-    NodePort Range              30000-32767       External/Master -> Worker
-    Calico/CNI (pod traffic)   All traffic       Master <-> Worker (SG-to-SG)
+    NAME         STATUS   ROLES
+    controller   Ready    control-plane
+    worker1      Ready    <none>
 
-If a worker fails to join, the most common cause is a missing Security
-Group rule between the control-plane-sg and the worker's SG on port 6443.
 
---------------------------------------------------------------------------------
-TROUBLESHOOTING
---------------------------------------------------------------------------------
+Check all pods:
 
-Script exits with an error:
-    - Read the last printed line; the script stops immediately on any
-      failed command (set -euo pipefail) and names the line number.
+    kubectl get pods -A
 
-Worker won't join / connectivity check fails:
-    - Check Security Group rules (see table above).
-    - Confirm the master's private IP and port are correct.
-    - Confirm the token has not expired (24 hour validity).
-
-Re-running a script:
-    - Both scripts are safe to re-run. If the cluster is already
-      initialized (control-setup.sh) or the node has already joined
-      (worker-setup.sh), the script will detect this and skip that step
-      instead of failing.
-
-Starting over on a node:
-    sudo kubeadm reset
-    (then re-run the relevant script)
 
 ================================================================================
-END OF USAGE GUIDE
+TROUBLESHOOTING
+================================================================================
+
+Check Controller logs:
+
+    sudo tail -f /var/log/kubeadm-controller-bootstrap.log
+
+
+Check Worker logs:
+
+    sudo tail -f /var/log/kubeadm-worker-bootstrap.log
+
+
+Check nodes:
+
+    kubectl get nodes
+
+
+If Worker cannot connect to Controller:
+
+    Check that port 6443 is allowed between Worker and Controller.
+
+If the Worker was previously joined:
+
+    sudo kubeadm reset -f
+
+Then run worker.sh again.
+
+
+================================================================================
+IMPORTANT
+================================================================================
+
+Never put the kubeadm token inside GitHub.
+
+Generate a fresh join command on the Controller when needed:
+
+    sudo kubeadm token create --ttl 0 --print-join-command
+
+
+The Controller private IP must be reachable from the Worker.
+
+================================================================================
+END
 ================================================================================
