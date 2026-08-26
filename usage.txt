@@ -1,214 +1,169 @@
 ================================================================================
-SELF-MANAGED KUBERNETES
-SIMPLE USAGE GUIDE
+AWS - USAGE
 ================================================================================
 
-This folder contains:
+CONTROLLER
 
-    controller.sh  -> Run on the Controller node
-    worker.sh      -> Run on the Worker node
+SSH:
 
-Kubernetes : v1.34
-OS         : Ubuntu 22.04
-Runtime    : containerd
-CNI        : Flannel
+ssh -i my-key.pem ubuntu@<CONTROLLER_PUBLIC_IP>
 
-Cluster:
+Go to scripts:
 
-    Controller
-        |
-        +---- Worker1
+cd ~/self-managed-k8s-automation/AWS
 
+Make executable:
 
-================================================================================
-SECTION 1 - CONTROLLER
-================================================================================
-
-STEP 1 - SSH INTO CONTROLLER
-
-    ssh -i ~/.ssh/id_ed25519 azureuser@<CONTROLLER_PUBLIC_IP>
-
-
-STEP 2 - GO TO THE SCRIPT
-
-    cd ~/self-managed-k8s-automation/Azure
-
-
-STEP 3 - MAKE SCRIPT EXECUTABLE
-
-    chmod +x controller.sh
-
-
-STEP 4 - RUN CONTROLLER SCRIPT
-
-    sudo ./controller.sh
-
-
-The script automatically:
-
-    - Disables swap
-    - Installs containerd
-    - Installs kubeadm
-    - Installs kubelet
-    - Installs kubectl
-    - Configures Kubernetes networking
-    - Initializes the Kubernetes control plane
-    - Installs Flannel
-    - Configures kubectl
-    - Generates a worker join command
-
-
-STEP 5 - GET WORKER JOIN INFORMATION
+chmod +x controller.sh
 
 Run:
 
-    sudo kubeadm token create --ttl 0 --print-join-command
+sudo ./controller.sh <CONTROLLER_PRIVATE_IP>
 
 
-You will get something similar to:
+INSTALLED / CONFIGURED
 
-    kubeadm join 10.20.1.4:6443 \
-      --token abcdef.0123456789abcdef \
-      --discovery-token-ca-cert-hash sha256:123456...
-
-
-You need these 3 values:
-
-    1. Controller IP
-
-       10.20.1.4
-
-    2. Token
-
-       abcdef.0123456789abcdef
-
-    3. CA certificate hash
-
-       sha256:123456...
+- containerd
+- kubeadm
+- kubelet
+- kubectl
+- Kubernetes Control Plane
+- CNI Plugin
 
 
-Keep these values safe.
+GET JOIN COMMAND
 
-DO NOT commit the token to GitHub.
-
-
-================================================================================
-SECTION 2 - WORKER
-================================================================================
-
-STEP 1 - SSH INTO WORKER
-
-    ssh -i ~/.ssh/id_ed25519 azureuser@<WORKER_PUBLIC_IP>
+kubeadm token create --print-join-command
 
 
-STEP 2 - GO TO THE SCRIPT
+WORKER
 
-    cd ~/self-managed-k8s-automation/Azure
+SSH:
 
+ssh -i my-key.pem ubuntu@<WORKER_PUBLIC_IP>
 
-STEP 3 - MAKE SCRIPT EXECUTABLE
+Go to scripts:
 
-    chmod +x worker.sh
+cd ~/self-managed-k8s-automation/AWS
 
+Make executable:
 
-STEP 4 - RUN WORKER SCRIPT
+chmod +x worker.sh
 
-Use the 3 values generated on the Controller:
+Run:
 
-    sudo ./worker.sh \
-      <CONTROLLER_PRIVATE_IP> \
-      <TOKEN> \
-      <CA_CERT_HASH>
-
-
-Example:
-
-    sudo ./worker.sh \
-      10.20.1.4 \
-      "abcdef.0123456789abcdef" \
-      "sha256:123456..."
+sudo ./worker.sh <CONTROLLER_PRIVATE_IP:6443> <TOKEN> <CA_CERT_HASH>
 
 
-The script automatically:
+INSTALLED / CONFIGURED
 
-    - Checks that all 3 parameters are provided
-    - Disables swap
-    - Installs containerd
-    - Installs kubeadm
-    - Installs kubelet
-    - Configures Kubernetes networking
-    - Waits for the Controller API
-    - Runs kubeadm join
-    - Joins the Worker to the cluster
+- containerd
+- kubeadm
+- kubelet
+- Kubernetes Worker Node
+- Kubernetes CNI networking
 
 
-If any parameter is missing, the script stops immediately.
+VERIFY CLUSTER
+
+kubectl get nodes -o wide
+
+kubectl get pods -A
+
+kubectl get svc -A
+
+kubectl get deployments -A
+
+
+RESET WORKER
+
+sudo kubeadm reset -f
 
 
 ================================================================================
-VERIFY THE CLUSTER
+AZURE - USAGE
 ================================================================================
 
-Go back to the Controller:
+CONTROLLER
 
-    kubectl get nodes -o wide
+SSH:
 
+ssh -i ~/.ssh/id_ed25519 azureuser@<CONTROLLER_PUBLIC_IP>
 
-Expected:
+Go to scripts:
 
-    NAME         STATUS   ROLES
-    controller   Ready    control-plane
-    worker1      Ready    <none>
+cd ~/self-managed-k8s-automation/Azure
 
+Make executable:
 
-Check all pods:
+chmod +x controller.sh
 
-    kubectl get pods -A
+Run:
 
-
-================================================================================
-TROUBLESHOOTING
-================================================================================
-
-Check Controller logs:
-
-    sudo tail -f /var/log/kubeadm-controller-bootstrap.log
+sudo ./controller.sh
 
 
-Check Worker logs:
+INSTALLED / CONFIGURED
 
-    sudo tail -f /var/log/kubeadm-worker-bootstrap.log
-
-
-Check nodes:
-
-    kubectl get nodes
-
-
-If Worker cannot connect to Controller:
-
-    Check that port 6443 is allowed between Worker and Controller.
-
-If the Worker was previously joined:
-
-    sudo kubeadm reset -f
-
-Then run worker.sh again.
+- containerd
+- kubeadm
+- kubelet
+- kubectl
+- Kubernetes Control Plane
+- Flannel CNI
+- kubeconfig
 
 
-================================================================================
-IMPORTANT
-================================================================================
+GET JOIN VALUES
 
-Never put the kubeadm token inside GitHub.
-
-Generate a fresh join command on the Controller when needed:
-
-    sudo kubeadm token create --ttl 0 --print-join-command
+sudo kubeadm token create --ttl 0 --print-join-command
 
 
-The Controller private IP must be reachable from the Worker.
+WORKER
 
-================================================================================
-END
+SSH:
+
+ssh -i ~/.ssh/id_ed25519 azureuser@<WORKER_PUBLIC_IP>
+
+Go to scripts:
+
+cd ~/self-managed-k8s-automation/Azure
+
+Make executable:
+
+chmod +x worker.sh
+
+Run:
+
+sudo ./worker.sh \
+  <CONTROLLER_PRIVATE_IP> \
+  <TOKEN> \
+  <CA_CERT_HASH>
+
+
+INSTALLED / CONFIGURED
+
+- containerd
+- kubeadm
+- kubelet
+- Kubernetes Worker Node
+- Flannel CNI networking
+
+
+VERIFY CLUSTER
+
+kubectl get nodes -o wide
+
+kubectl get pods -A
+
+kubectl get svc -A
+
+kubectl get deployments -A
+
+
+RESET WORKER
+
+sudo kubeadm reset -f
+
+
 ================================================================================
